@@ -14,6 +14,8 @@
       </div>
     </div>
     <el-button type="success" size="small" @click="analyze" :loading="store.loading" :disabled="!rois.length" style="margin-top:8px">📊 分析ROI</el-button>
+    <el-button size="small" @click="shareVisible = true" :disabled="!rois.length" style="margin-top:8px">🔗 分享标记</el-button>
+    <ShareDialog v-model="shareVisible" :rois="rois" :preset="store.preset" :window-val="store.windowVal" :level-val="store.levelVal" />
 
     <div v-if="store.roiResults.length" class="results">
       <div v-for="r in store.roiResults" :key="r.label" class="roi-result">
@@ -33,12 +35,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useImagingStore } from '../store/imaging'
+import ShareDialog from './ShareDialog.vue'
 const store = useImagingStore()
 
 interface ROIDef { label: string; center: number[]; radius: number }
 const rois = ref<ROIDef[]>([
   { label: 'lesion1', center: [30, 28, 32], radius: 6 }
 ])
+const shareVisible = ref(false)
 
 function addROI() { rois.value.push({ label: `roi-${rois.value.length+1}`, center: [32, 32, 32], radius: 8 }) }
 function removeROI(i: number) { rois.value.splice(i, 1) }

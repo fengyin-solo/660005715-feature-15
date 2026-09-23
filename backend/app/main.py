@@ -1,6 +1,8 @@
-import random, math
+import random, math, uuid
+from datetime import datetime, timezone
+from typing import List
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -176,3 +178,97 @@ def analyze_roi(req: ROIAnalyzeRequest):
 @app.get("/api/windows")
 def get_windows():
     return {"presets": WINDOW_PRESETS}
+
+
+# ---------------------------------------------------------------------------
+# 标记只读共享
+# 共享内容在服务端保存快照；查看时按名单鉴权，未授权/已撤回一律不返回标记细节。
+# ---------------------------------------------------------------------------
+
+SHARES: dict = {}
+
+
+class ShareCreateRequest(BaseModel):
+    owner: str                       # 分享来源（创建者姓名）
+    viewers: List[str] = []          # 允许查看者名单（创建者本人始终可看）
+    preset: str = "brain"
+    window: float = 80.0
+    level: float = 40.0
+    rois: list = []                  # 标记快照 [{label, center, radius}]，只读
+
+
+class ShareRevokeRequest(BaseModel):
+    owner: str
+
+
+def _share_summary(s: dict) -> dict:
+    return {
+        "id": s["id"],
+        "owner": s["owner"],
+        "createdAt": s["created_at"],
+        "revoked": s["revoked"],
+        "viewers": s["viewers"],
+        "roiCount": len(s["rois"]),
+    }
+
+
+@app.post("/api/shares", status_code=201)
+def create_share(req: ShareCreateRequest):
+    if not req.owner.strip():
+        raise HTTPException(400, "请填写分享者姓名（来源标识）")
+    if not req.rois:
+        raise HTTPException(400, "没有可分享的标记")
+    sid = uuid.uuid4().hex[:12]
+    SHARES[sid] = {
+        "id": sid,
+        "owner": req.owner.strip(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "viewers": [v.strip() for v in req.viewers if v.strip()],
+        "preset": req.preset,
+        "window": req.window,
+        "level": req.level,
+        "rois": req.rois,
+        "revoked": False,
+        "revoked_at": None,
+    }
+    return _share_summary(SHARES[sid])
+
+
+@app.get("/api/shares")
+def list_shares(owner: str = ""):
+    """所有者管理自己的分享列表（不含标记细节）"""
+    return {"shares": [_share_summary(s) for s in SHARES.values() if s["owner"] == owner]}
+
+
+@app.get("/api/shares/{share_id}")
+def get_share(share_id: str, viewer: str = ""):
+    """只读查看共享标记。任何校验失败都不返回标记细节，只说明原因。"""
+    s = SHARES.get(share_id)
+    if not s:
+        raise HTTPException(404, "分享不存在，链接可能有误")
+    if s["revoked"]:
+        raise HTTPException(410, "该分享已被所有者撤回，标记内容不可再查看")
+    if viewer != s["owner"] and viewer not in s["viewers"]:
+        raise HTTPException(403, "您不在该分享的允许查看名单中，无权查看标记细节")
+    return {
+        "id": s["id"],
+        "owner": s["owner"],
+        "createdAt": s["created_at"],
+        "preset": s["preset"],
+        "window": s["window"],
+        "level": s["level"],
+        "viewers": s["viewers"],
+        "rois": s["rois"],
+    }
+
+
+@app.post("/api/shares/{share_id}/revoke")
+def revoke_share(share_id: str, req: ShareRevokeRequest):
+    s = SHARES.get(share_id)
+    if not s:
+        raise HTTPException(404, "分享不存在")
+    if s["owner"] != req.owner:
+        raise HTTPException(403, "只有分享所有者本人可以撤回该分享")
+    s["revoked"] = True
+    s["revoked_at"] = datetime.now(timezone.utc).isoformat()
+    return _share_summary(s)

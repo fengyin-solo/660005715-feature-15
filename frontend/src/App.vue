@@ -1,5 +1,6 @@
 <template>
-  <div class="app-root">
+  <SharedView v-if="shareId" :share-id="shareId" />
+  <div class="app-root" v-else>
     <header class="top-bar">
       <h1>🩻 三维医学影像体渲染与ROI标注平台</h1>
       <div class="tools">
@@ -33,8 +34,11 @@ import VolumeRenderer from './components/VolumeRenderer.vue'
 import MPRView from './components/MPRView.vue'
 import WindowControl from './components/WindowControl.vue'
 import ROIPanel from './components/ROIPanel.vue'
+import SharedView from './components/SharedView.vue'
 import { useImagingStore } from './store/imaging'
 const store = useImagingStore()
+// URL 带 ?share=<id> 时进入只读共享视图，本地标注与测量流程不受影响
+const shareId = new URLSearchParams(window.location.search).get('share')
 </script>
 
 <style>
